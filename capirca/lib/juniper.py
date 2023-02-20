@@ -16,11 +16,11 @@
 """Juniper JCL generator."""
 
 import datetime
+import collections
 from absl import logging
 from capirca.lib import aclgenerator
 from capirca.lib import nacaddr
 from capirca.lib import summarizer
-import six
 
 
 # generic error class
@@ -147,30 +147,78 @@ class Term(aclgenerator.Term):
   # filters the juniper generator can render.  As new differences are
   # encountered, they should be added to this table.  Accessing members
   # of this table looks like:
-  #  self._TERM_TYPE('inet').get('saddr') -> 'source-address'
+  #  self._TERM_TYPE('inet').get('saddr') -> 'source-prefix-list'
   #
   # it's critical that the members of each filter type be the same, that is
   # to say that if _TERM_TYPE.get('inet').get('foo') returns something,
   # _TERM_TYPE.get('inet6').get('foo') must return the inet6 equivalent.
-  _TERM_TYPE = {'inet': {'addr': 'address',
-                         'saddr': 'source-address',
-                         'daddr': 'destination-address',
+  _TERM_TYPE = {'inet': {'addr': 'prefix-list',
+                         'saddr': 'source-prefix-list',
+                         'daddr': 'destination-prefix-list',
                          'protocol': 'protocol',
                          'protocol-except': 'protocol-except',
                          'tcp-est': 'tcp-established'},
                 'inet6': {'addr': 'address',
-                          'saddr': 'source-address',
-                          'daddr': 'destination-address',
+                          'saddr': 'source-prefix-list',
+                          'daddr': 'destination-prefix-list',
                           'protocol': 'next-header',
                           'protocol-except': 'next-header-except',
                           'tcp-est': 'tcp-established'},
                 'bridge': {'addr': 'ip-address',
-                           'saddr': 'ip-source-address',
-                           'daddr': 'ip-destination-address',
+                           'saddr': 'ip-source-prefix-list',
+                           'daddr': 'ip-destination-prefix-list',
                            'protocol': 'ip-protocol',
                            'protocol-except': 'ip-protocol-except',
                            'tcp-est': 'tcp-flags "(ack|rst)"'}
-              }
+               }
+
+  _ICMP_TYPE_MAP = {4: {0: 'echo-reply',
+                        3: 'unreachable',
+                        4: 'source-quench',
+                        5: 'redirect',
+                        8: 'echo-request',
+                       10: 'router-solicit',
+                       11: 'time-exceeded',
+                       12: 'parameter-problem',
+                       12: 'parameter-problem',
+                       13: 'timestamp',
+                       14: 'timestamp-reply',
+                       15: 'info-request',
+                       16: 'info-reply',
+                       17: 'mask-request',
+                       18: 'mask-reply',
+                      },
+                    6: {  1: 'destination-unreachable',
+                          2: 'packet-too-big',
+                          3: 'time-exceeded',
+                          4: 'parameter-problem',
+                        100: 'private-experimentation-100',
+                        101: 'private-experimentation-101',
+                        128: 'echo-request',
+                        129: 'echo-reply',
+                        130: 'membership-query',
+                        131: 'membership-report',
+                        132: 'membership-termination',
+                        133: 'router-solicit',
+                        134: 'router-advertisement',
+                        135: 'neighbor-solicit',
+                        136: 'neighbor-advertisement',
+                        137: 'redirect',
+                        138: 'router-renumbering',
+                        139: 'node-information-request',
+                        140: 'node-information-reply',
+                        141: 'inverse-neighbor-discovery-solicitation',
+                        142: 'inverse-neighbor-discovery-advertisement',
+                        144: 'home-agent-address-discovery-request',
+                        145: 'home-agent-address-discovery-reply',
+                        146: 'mobile-prefix-solicitation',
+                        147: 'mobile-prefix-advertisement-reply',
+                        148: 'certificate-path-solicitation',
+                        149: 'certificate-path-advertisement',
+                        200: 'private-experimentation-200',
+                        201: 'private-experimentation-201',
+                       }
+                }
 
   def __init__(self, term, term_type, enable_dsmo, noverbose, filter_direction=None, interface_type=None):
     super().__init__(term)
@@ -330,96 +378,47 @@ class Term(aclgenerator.Term):
       config.Append('from {')
 
       term_af = self.AF_MAP.get(self.term_type)
-
       # address
       address = self.term.GetAddressOfVersion('address', term_af)
-      if self.enable_dsmo:
-        address = summarizer.Summarize(address)
+      address_ex = self.term.GetAddressOfVersion('address_exclude', term_af)
 
-      if address:
+      prefixlists = sorted(set([x.parent_token for x in address]))
+      prefixlists_ex = sorted(set([x.parent_token for x in address_ex]))
+      if prefixlists:
         config.Append('%s {' % family_keywords['addr'])
-        for addr in address:
-          for comment in self._Comment(addr):
-            config.Append('%s' % comment)
-          if self.enable_dsmo:
-            config.Append('%s/%s;' % summarizer.ToDottedQuad(addr, nondsm=True))
-          else:
-            config.Append('%s;' % addr)
+        for prefixlist in prefixlists:
+            config.Append('%s;' % prefixlist)
+        for prefixlist in prefixlists_ex:
+            config.Append('%s except;' % prefixlist)
         config.Append('}')
-      elif self.term.address:
-        logging.debug(self.NO_AF_LOG_ADDR.substitute(term=self.term.name,
-                                                     af=self.term_type))
-        return ''
 
       # source address
-
       src_addr = self.term.GetAddressOfVersion('source_address', term_af)
       src_addr_ex = self.term.GetAddressOfVersion('source_address_exclude',
                                                   term_af)
-      if self.enable_dsmo:
-        src_addr = summarizer.Summarize(src_addr)
-        src_addr_ex = summarizer.Summarize(src_addr_ex)
-      else:
-        src_addr, src_addr_ex = self._MinimizePrefixes(src_addr, src_addr_ex)
-
-      if src_addr:
+      prefixlists = sorted(set([x.parent_token for x in src_addr]))
+      prefixlists_ex = sorted(set([x.parent_token for x in src_addr_ex]))
+      if prefixlists:
         config.Append('%s {' % family_keywords['saddr'])
-        for addr in src_addr:
-          for comment in self._Comment(addr):
-            config.Append('%s' % comment)
-          if self.enable_dsmo:
-            config.Append('%s/%s;' % summarizer.ToDottedQuad(addr, nondsm=True))
-          else:
-            config.Append('%s;' % addr)
-        for addr in src_addr_ex:
-          for comment in self._Comment(addr, exclude=True):
-            config.Append('%s' % comment)
-          if self.enable_dsmo:
-            config.Append('%s/%s except;' %
-                          summarizer.ToDottedQuad(addr, nondsm=True))
-          else:
-            config.Append('%s except;' % addr)
+        for prefixlist in prefixlists:
+            config.Append('%s;' % prefixlist)
+        for prefixlist in prefixlists_ex:
+            config.Append('%s except;' % prefixlist)
         config.Append('}')
-      elif self.term.source_address:
-        logging.debug(self.NO_AF_LOG_ADDR.substitute(term=self.term.name,
-                                                     direction='source',
-                                                     af=self.term_type))
-        return ''
 
       # destination address
       dst_addr = self.term.GetAddressOfVersion('destination_address', term_af)
       dst_addr_ex = self.term.GetAddressOfVersion('destination_address_exclude',
                                                   term_af)
-      if self.enable_dsmo:
-        dst_addr = summarizer.Summarize(dst_addr)
-        dst_addr_ex = summarizer.Summarize(dst_addr_ex)
-      else:
-        dst_addr, dst_addr_ex = self._MinimizePrefixes(dst_addr, dst_addr_ex)
-
-      if dst_addr:
+      prefixlists = sorted(set([x.parent_token for x in dst_addr]))
+      prefixlists_ex = sorted(set([x.parent_token for x in dst_addr_ex]))
+      if prefixlists:
         config.Append('%s {' % family_keywords['daddr'])
-        for addr in dst_addr:
-          for comment in self._Comment(addr):
-            config.Append('%s' % comment)
-          if self.enable_dsmo:
-            config.Append('%s/%s;' % summarizer.ToDottedQuad(addr,
-                                                             nondsm=True))
-          else:
-            config.Append('%s;' % addr)
-        for addr in dst_addr_ex:
-          for comment in self._Comment(addr, exclude=True):
-            config.Append('%s' % comment)
-          if self.enable_dsmo:
-            config.Append('%s/%s except;' %
-                          summarizer.ToDottedQuad(addr, nondsm=True))
-          else:
-            config.Append('%s except;' % addr)
+        for prefixlist in prefixlists:
+            config.Append('%s;' % prefixlist)
+        for prefixlist in prefixlists_ex:
+            config.Append('%s except;' % prefixlist)
         config.Append('}')
-      elif self.term.destination_address:
-        logging.debug(self.NO_AF_LOG_ADDR.substitute(term=self.term.name,
-                                                     direction='destination',
-                                                     af=self.term_type))
-        return ''
 
       # forwarding-class
       if self.term.forwarding_class:
@@ -453,19 +452,6 @@ class Term(aclgenerator.Term):
       if self.term.ttl and self.term_type == 'inet':
         config.Append('ttl %s;' % self.term.ttl)
 
-      # port
-      if self.term.port:
-        config.Append('port %s' % self._Group(self.term.port))
-
-      # source port
-      if self.term.source_port:
-        config.Append('source-port %s' % self._Group(self.term.source_port))
-
-      # destination port
-      if self.term.destination_port:
-        config.Append('destination-port %s' %
-                      self._Group(self.term.destination_port))
-
       # append any options beloging in the from {} section
       for next_str in from_str:
         config.Append(next_str)
@@ -483,6 +469,8 @@ class Term(aclgenerator.Term):
       if self.term.icmp_type:
         icmp_types = self.NormalizeIcmpTypes(self.term.icmp_type,
                                              self.term.protocol, self.term_type)
+        icmp_types = [self._ICMP_TYPE_MAP[term_af][i] if i in self._ICMP_TYPE_MAP[term_af]
+                      else i for i in icmp_types]
       if icmp_types != ['']:
         config.Append('icmp-type %s' % self._Group(icmp_types))
       if self.term.icmp_code:
@@ -509,6 +497,18 @@ class Term(aclgenerator.Term):
         config.Append(family_keywords['protocol-except'] + ' ' +
                       self._Group(self.term.protocol_except))
 
+      # port
+      if self.term.port:
+        config.Append('port %s' % self._Group(self.term.port))
+
+      # source port
+      if self.term.source_port:
+        config.Append('source-port %s' % self._Group(self.term.source_port))
+
+      # destination port
+      if self.term.destination_port:
+        config.Append('destination-port %s' %
+                      self._Group(self.term.destination_port))
       if self.term.traffic_type:
         config.Append('traffic-type %s' %
                       self._Group(self.term.traffic_type))
@@ -747,6 +747,131 @@ class Term(aclgenerator.Term):
 
     return include_result, exclude_result
 
+  def _Group(self, group, lc=True):
+    """If 1 item return it, else return [ item1 item2 ].
+
+    Args:
+      group: a list.  could be a list of strings (protocols) or a list of
+             tuples (ports)
+      lc: return a lower cased result for text.  Default is True.
+
+    Returns:
+      rval: a string surrounded by '[' and '];' if len(group) > 1
+            or with just ';' appended if len(group) == 1
+    """
+
+    def _FormattedGroup(el, lc=True):
+      """Return the actual formatting of an individual element.
+
+      Args:
+        el: either a string (protocol) or a tuple (ports)
+        lc: return lower cased result for text.  Default is True.
+
+      Returns:
+        string: either the lower()'ed string or the ports, hyphenated
+                if they're a range, or by itself if it's not.
+      """
+      if isinstance(el, str) or isinstance(el, str):
+        if lc:
+          return el
+        else:
+          return el.lower()
+      elif isinstance(el, int):
+        return str(el)
+      # type is a tuple below here
+      elif el[0] == el[1]:
+        return '%d' % el[0]
+      else:
+        return '%d-%d' % (el[0], el[1])
+
+    if len(group) > 1:
+      rval = '[ ' + ' '.join([_FormattedGroup(x) for x in group]) + ' ];'
+    else:
+      rval = _FormattedGroup(group[0]) + ';'
+    return rval
+
+
+class Juniper(aclgenerator.ACLGenerator):
+  """JCL rendering class.
+
+    This class takes a policy object and renders the output into a syntax
+    which is understood by juniper routers.
+
+  Attributes:
+    pol: policy.Policy object
+  """
+
+  _PLATFORM = 'juniper'
+  _DEFAULT_PROTOCOL = 'ip'
+  _DEFAULT_INDENT = 12
+  _SUPPORTED_AF = frozenset(('inet', 'inet6', 'bridge', 'mixed'))
+  _TERM = Term
+  SUFFIX = '.jcl'
+  _AF_MAP = {'inet': (4,),
+             'inet6': (6,),
+             'mixed': (4, 6)}
+
+  def __init__(self, pol, exp_info):
+    self.prefixlists = collections.OrderedDict()
+    super().__init__(pol, exp_info)
+
+  def _BuildTokens(self):
+    """Build supported tokens for platform.
+
+    Returns:
+      tuple containing both supported tokens and sub tokens
+    """
+    supported_tokens, supported_sub_tokens = super()._BuildTokens()
+
+    supported_tokens |= {'address',
+                         'restrict_address_family',
+                         'counter',
+                         'decapsulate',
+                         'destination_prefix',
+                         'destination_prefix_except',
+                         'dscp_except',
+                         'dscp_match',
+                         'dscp_set',
+                         'encapsulate',
+                         'ether_type',
+                         'filter_term',
+                         'flexible_match_range',
+                         'forwarding_class',
+                         'forwarding_class_except',
+                         'fragment_offset',
+                         'hop_limit',
+                         'icmp_code',
+                         'logging',
+                         'loss_priority',
+                         'next_ip',
+                         'owner',
+                         'packet_length',
+                         'policer',
+                         'port',
+                         'port_mirror',
+                         'precedence',
+                         'protocol_except',
+                         'qos',
+                         'routing_instance',
+                         'source_prefix',
+                         'source_prefix_except',
+                         'traffic_type',
+                         'traffic_class_count',
+                         'ttl'}
+    supported_sub_tokens.update({
+        'option': {
+            'established',
+            'first-fragment',
+            'is-fragment',
+            # TODO(sneakywombat): add all options to lex.
+            '.*',  # make ArbitraryOptions work, yolo.
+            'sample',
+            'tcp-established',
+            'tcp-initial',
+            'inactive'}
+         })
+    return supported_tokens, supported_sub_tokens
+
   def _Comment(self, addr, exclude=False, line_length=132):
     """Returns address comment field if it exists.
 
@@ -839,122 +964,36 @@ class Term(aclgenerator.Term):
       logging.debug('Ignoring non IPv4 or IPv6 address: %s', addr)
     return rval
 
-  def _Group(self, group, lc=True):
-    """If 1 item return it, else return [ item1 item2 ].
+  def _BuildPrefixList(self, address):
+    """Create the prefix list configuration entries.
 
     Args:
-      group: a list.  could be a list of strings (protocols) or a list of
-             tuples (ports)
-      lc: return a lower cased result for text.  Default is True.
+      address: a naming library address object
+    """
+    name = address.parent_token
+    if name not in self.prefixlists:
+      self.prefixlists[name] = []
+    self.prefixlists[name].append(address)
+
+  def _SortPrefixListNumCheck(self, item):
+    """Used to give a natural order to the list of acl entries.
+
+    Args:
+      item: string of the address book entry name
 
     Returns:
-      rval: a string surrounded by '[' and '];' if len(group) > 1
-            or with just ';' appended if len(group) == 1
+      returns the characters and number
     """
 
-    def _FormattedGroup(el, lc=True):
-      """Return the actual formatting of an individual element.
-
-      Args:
-        el: either a string (protocol) or a tuple (ports)
-        lc: return lower cased result for text.  Default is True.
-
-      Returns:
-        string: either the lower()'ed string or the ports, hyphenated
-                if they're a range, or by itself if it's not.
-      """
-      if isinstance(el, str) or isinstance(el, str):
-        if lc:
-          return el
-        else:
-          return el.lower()
-      elif isinstance(el, int):
-        return str(el)
-      # type is a tuple below here
-      elif el[0] == el[1]:
-        return '%d' % el[0]
-      else:
-        return '%d-%d' % (el[0], el[1])
-
-    if len(group) > 1:
-      rval = '[ ' + ' '.join([_FormattedGroup(x) for x in group]) + ' ];'
-    else:
-      rval = _FormattedGroup(group[0]) + ';'
-    return rval
-
-
-class Juniper(aclgenerator.ACLGenerator):
-  """JCL rendering class.
-
-    This class takes a policy object and renders the output into a syntax
-    which is understood by juniper routers.
-
-  Attributes:
-    pol: policy.Policy object
-  """
-
-  _PLATFORM = 'juniper'
-  _DEFAULT_PROTOCOL = 'ip'
-  _SUPPORTED_AF = frozenset(('inet', 'inet6', 'bridge', 'mixed'))
-  _TERM = Term
-  SUFFIX = '.jcl'
-
-  def _BuildTokens(self):
-    """Build supported tokens for platform.
-
-    Returns:
-      tuple containing both supported tokens and sub tokens
-    """
-    supported_tokens, supported_sub_tokens = super()._BuildTokens()
-
-    supported_tokens |= {'address',
-                         'restrict_address_family',
-                         'counter',
-                         'decapsulate',
-                         'destination_prefix',
-                         'destination_prefix_except',
-                         'dscp_except',
-                         'dscp_match',
-                         'dscp_set',
-                         'encapsulate',
-                         'ether_type',
-                         'filter_term',
-                         'flexible_match_range',
-                         'forwarding_class',
-                         'forwarding_class_except',
-                         'fragment_offset',
-                         'hop_limit',
-                         'icmp_code',
-                         'logging',
-                         'loss_priority',
-                         'next_ip',
-                         'owner',
-                         'packet_length',
-                         'policer',
-                         'port',
-                         'port_mirror',
-                         'precedence',
-                         'protocol_except',
-                         'qos',
-                         'routing_instance',
-                         'source_prefix',
-                         'source_prefix_except',
-                         'traffic_type',
-                         'traffic_class_count',
-                         'ttl'}
-    supported_sub_tokens.update({
-        'option': {
-            'established',
-            'first-fragment',
-            'is-fragment',
-            # TODO(sneakywombat): add all options to lex.
-            '.*',  # make ArbitraryOptions work, yolo.
-            'sample',
-            'tcp-established',
-            'tcp-initial',
-            'inactive'}
-         })
-    return supported_tokens, supported_sub_tokens
+    item_list = item.split('_')
+    num = item_list.pop(-1)
+    if isinstance(item_list[-1], int):
+      set_number = item_list.pop(-1)
+      num = int(set_number) * 1000 + int(num)
+    alpha = '_'.join(item_list)
+    if num:
+      return (alpha, int(num))
+    return (alpha, 0)
 
   def _TranslatePolicy(self, pol, exp_info):
     self.juniper_policies = []
@@ -972,7 +1011,7 @@ class Juniper(aclgenerator.ACLGenerator):
       # the list.
       interface_specific = 'not-interface-specific' not in filter_options[1:]
       enable_dsmo = 'enable_dsmo' in filter_options[1:]
-      noverbose = 'noverbose' in filter_options[1:]
+      self.noverbose = 'noverbose' in filter_options[1:]
       filter_enhanced_mode = 'filter_enhanced_mode' in filter_options[1:]
 
       filter_direction = None
@@ -1045,22 +1084,81 @@ class Juniper(aclgenerator.ACLGenerator):
               logging.warning('WARNING: Term %s in policy %s is expired and '
                               'will not be rendered.', term.name, filter_name)
               continue
-          if 'is-fragment' in term.option and filter_type == 'inet6':
-            raise JuniperFragmentInV6Error('The term %s uses "is-fragment" but '
-                                          'is a v6 policy.' % term.name)
 
-          new_terms.append(self._TERM(term, filter_type, enable_dsmo, noverbose, filter_direction, interface_type))
+          # For IPv6, next-header is 'fragment', not an 'is-fragment' option
+          if 'is-fragment' in term.option and filter_type == 'inet6':
+            term.protocol =  ['fragment']
+            term.option.remove('is-fragment')
+
+          # Filter address based on filter_type & add to prefix-list
+          if term.address:
+            valid_addrs = []
+            for addr in term.address:
+              if addr.version in self._AF_MAP[filter_type]:
+                valid_addrs.append(addr)
+            if not valid_addrs:
+              logging.warning(
+                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
+              continue
+            for addr in valid_addrs:
+              self._BuildPrefixList(addr)
+
+          # Filter source_address based on filter_type & add to prefix-list
+          if term.source_address:
+            valid_addrs = []
+            for addr in term.source_address:
+              if addr.version in self._AF_MAP[filter_type]:
+                valid_addrs.append(addr)
+            if not valid_addrs:
+              logging.warning(
+                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
+              continue
+            for addr in valid_addrs:
+              self._BuildPrefixList(addr)
+
+          # Filter destination_address based on filter_type & add to prefix-list
+          if term.destination_address:
+            valid_addrs = []
+            for addr in term.destination_address:
+              if addr.version in self._AF_MAP[filter_type]:
+                valid_addrs.append(addr)
+            if not valid_addrs:
+              logging.warning(
+                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
+              continue
+            for addr in valid_addrs:
+              self._BuildPrefixList(addr)
+
+          new_terms.append(self._TERM(term, filter_type, enable_dsmo, self.noverbose, filter_direction, interface_type))
 
         self.juniper_policies.append((header, filter_name + filter_name_suffix, filter_type,
                                       interface_specific, filter_enhanced_mode, new_terms))
 
+  def _GeneratePrefixLists(self, config):
+    """Creates policy-options prefix-lists."""
+
+    names = sorted(self.prefixlists.keys())
+    for name in names:
+      config.Append('replace: prefix-list ' + name + ' {')
+      ips = nacaddr.SortAddrList(self.prefixlists[name])
+      ips = nacaddr.CollapseAddrList(ips)
+      self.prefixlists[name] = ips
+      for ip in self.prefixlists[name]:
+        for comment in self._Comment(ip):
+          config.Append('%s' % comment)
+        config.Append(str(ip) + ';')
+      config.Append('}')  # prefix-list ... { ... }
+
   def __str__(self):
     config = Config()
+    config.Append('policy-options {')
+    self._GeneratePrefixLists(config)
+    config.Append('}') # policy-options { ... }
 
+    config.Append('firewall {')
     for (header, filter_name, filter_type, interface_specific, filter_enhanced_mode, terms
         ) in self.juniper_policies:
       # add the header information
-      config.Append('firewall {')
       config.Append('family %s {' % filter_type)
       config.Append('/*')
 
@@ -1090,6 +1188,6 @@ class Juniper(aclgenerator.ACLGenerator):
 
       config.Append('}')  # filter { ... }
       config.Append('}')  # family inet { ... }
-      config.Append('}')  # firewall { ... }
+    config.Append('}')  # firewall { ... }
 
     return str(config) + '\n'

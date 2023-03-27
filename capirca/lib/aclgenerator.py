@@ -339,6 +339,7 @@ class ACLGenerator:
                         'destination_address',
                         'destination_address_exclude',
                         'destination_port',
+                        'destination_port_names',
                         'expiration',
                         'icmp_type',
                         'stateless_reply',
@@ -350,6 +351,7 @@ class ACLGenerator:
                         'source_address',
                         'source_address_exclude',
                         'source_port',
+                        'source_port_names',
                         'translated',  # obj attribute, not token
                         'verbatim',
                         }

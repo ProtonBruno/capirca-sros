@@ -198,12 +198,14 @@ class Policy:
       if term.translated:
         continue
       if term.port:
+        term.port_names = term.port
         term.port = TranslatePorts(term.port, term.protocol, term.name)
         if not term.port:
           raise TermPortProtocolError(
               'no ports of the correct protocol for term %s' % (
                   term.name))
       if term.source_port:
+        term.source_port_names = term.source_port
         term.source_port = TranslatePorts(term.source_port, term.protocol,
                                           term.name)
         if not term.source_port:
@@ -211,6 +213,7 @@ class Policy:
               'no source ports of the correct protocol for term %s' % (
                   term.name))
       if term.destination_port:
+        term.destination_port_names = term.destination_port
         term.destination_port = TranslatePorts(term.destination_port,
                                                term.protocol, term.name)
         if not term.destination_port:
@@ -418,6 +421,7 @@ class Term:
     self.destination_address = []
     self.destination_address_exclude = []
     self.destination_port = []
+    self.destination_port_names = []
     self.destination_prefix = []
     self.filter_term = None
     self.forwarding_class = []
@@ -430,6 +434,7 @@ class Term:
     self.owner = None
     self.policer = None
     self.port = []
+    self.port_names = []
     self.precedence = []
     self.protocol = []
     self.protocol_except = []
@@ -439,6 +444,7 @@ class Term:
     self.source_address = []
     self.source_address_exclude = []
     self.source_port = []
+    self.source_port_names = []
     self.source_prefix = []
     self.ttl = None
     self.verbatim = []
@@ -2324,8 +2330,6 @@ def p_port_spec(p):
       p[0].append(VarType(VarType.DPORT, port))
     else:
       p[0].append(VarType(VarType.PORT, port))
-
-
 def p_protocol_spec(p):
   """ protocol_spec : PROTOCOL ':' ':' strings_or_ints """
   p[0] = []

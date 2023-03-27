@@ -45,6 +45,7 @@ from capirca.lib import junipersrx
 from capirca.lib import k8s
 from capirca.lib import naming
 from capirca.lib import nftables
+from capirca.lib import nokia
 from capirca.lib import nsxv
 from capirca.lib import openconfig
 from capirca.lib import packetfilter
@@ -283,6 +284,8 @@ def RenderFile(base_directory: str, input_file: pathlib.Path,
     gca = copy.deepcopy(pol)
   if 'k8s' in platforms:
     k8s_pol = copy.deepcopy(pol)
+  if 'nokia' in platforms:
+    nokiasr = copy.deepcopy(pol)
 
   acl_obj: aclgenerator.ACLGenerator
 
@@ -439,6 +442,11 @@ def RenderFile(base_directory: str, input_file: pathlib.Path,
       RenderACL(
           str(acl_obj), acl_obj.SUFFIX, output_directory, input_file,
           write_files)
+    if nokiasr:
+      acl_obj = nokia.Nokia(nokiasr, exp_info)
+      RenderACL(
+          str(acl_obj), acl_obj.SUFFIX, output_directory, input_file,
+          write_files)
 
   # TODO(robankeny) add additional errors.
   except (
@@ -457,7 +465,8 @@ def RenderFile(base_directory: str, input_file: pathlib.Path,
       gce.Error,
       gce_vpc_tf.Error,
       cloudarmor.Error,
-      k8s.Error) as e:
+      k8s.Error,
+      nokiasr.Error) as e:
     raise ACLGeneratorError('Error generating target ACL for %s:\n%s' %
                             (input_file, e))
 

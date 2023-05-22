@@ -31,8 +31,7 @@ from binascii import crc_hqx
 class Error(Exception):
   pass
 
-
-class JuniperTermPortProtocolError(Error):
+class NokiaTermPortProtocolError(Error):
   pass
 
 
@@ -40,7 +39,7 @@ class TcpEstablishedWithNonTcpError(Error):
   pass
 
 
-class JuniperDuplicateTermError(Error):
+class NokiaDuplicateTermError(Error):
   pass
 
 
@@ -52,19 +51,12 @@ class PrecedenceError(Error):
   pass
 
 
-class JuniperIndentationError(Error):
+class NokiaIndentationError(Error):
   pass
 
 
-class JuniperNextIpError(Error):
-  pass
 
-
-class JuniperMultipleTerminatingActionError(Error):
-  pass
-
-
-class JuniperFragmentInV6Error(Error):
+class NokiaMultipleTerminatingActionError(Error):
   pass
 
 
@@ -116,13 +108,11 @@ class Term(aclgenerator.Term):
   _TERM_TYPE = {'inet': {'addr': 'ip ip-prefix-list',
                          'saddr': 'src-ip ip-prefix-list',
                          'daddr': 'dst-ip ip-prefix-list',
-                         'protocol': 'protocol',
-                         'tcp-est': 'tcp-established'},
+                         'protocol': 'protocol'},
                 'inet6': {'addr': 'ip ipv6-prefix-list',
                           'saddr': 'src-ip ipv6-prefix-list',
                           'daddr': 'dst-ip ipv6-prefix-list',
-                          'protocol': 'next-header',
-                          'tcp-est': 'tcp-established'},
+                          'protocol': 'next-header'},
                }
 
   def __init__(self, term, term_type, filter_name, entry_number):
@@ -244,7 +234,7 @@ class Term(aclgenerator.Term):
         elif opt.startswith('established'):
           if self.term.protocol == ['tcp']:
             if 'tcp-established' not in match_criteria:
-              match_criteria.append(self.family_keywords['tcp-est'])
+              match_criteria.append('tcp-established')
 
         # if tcp-established specified, but more than just tcp is included
         # in the protocols, raise an error
@@ -314,12 +304,16 @@ class Term(aclgenerator.Term):
       if self.term.protocol:
         # both are supported on JunOS, but only icmp6 is supported
         # on SRX loopback stateless filter, so set all instances of icmpv6 to icmp6.
-        if 'icmpv6' in self.term.protocol or 'icmp6' in self.term.protocol:
+        if set(self.term.protocol) == {'icmpv6' } or set(self.term.protocol) == {'icmp6'}:
           self.term.protocol = ['ipv6-icmp']
-        if 'tcp' in self.term.protocol and 'udp' in self.term.protocol:
+        if set(self.term.protocol) == {'tcp', 'udp'}:
           self.term.protocol = ['tcp-udp']
-        # FIXME No mapping for 'ah' and 'esp' FIXME implement protocol-list for multi-protocol
-        if 'ah' in self.term.protocol:
+        # FIXME No mapping for 'ah' and 'esp' 
+        if 'ah' in self.term.protocol or 'esp' in self.term.protocol:
+          return ''
+
+        # FIXME implement protocol-list for multi-protocol
+        if len(self.term.protocol) > 1):
           return ''
 
         match_criteria.append(self.family_keywords['protocol'] + ' ' + self.term.protocol[0])
@@ -385,7 +379,7 @@ class Term(aclgenerator.Term):
                                icmp_types):
         self._write_entry(*manytuple)
 
-    # FIXME implement log facility (numeric
+    # FIXME implement log facility (numeric)
     # FIXME implement non-named rate-limit facility rate-limit pir / pps-pir
     # FIXME Make logic for forward-when, discard-when and rate-limit with bit-patterns
 
@@ -402,21 +396,12 @@ class Term(aclgenerator.Term):
 
     return str(config)
 
-  @staticmethod
-  def NextIpCheck(next_ip, term_name):
-    if len(next_ip) > 1:
-      raise JuniperNextIpError('The following term has more '
-                               'than one next IP value: %s' % term_name)
-    if next_ip[0].num_addresses > 1:
-      raise JuniperNextIpError('The following term has a subnet '
-                               'instead of a host: %s' % term_name)
-
   def CheckTerminatingAction(self):
     action = set(self.term.action)
     if self.term.routing_instance:
       action.add(self.term.routing_instance)
     if len(action) > 1:
-      raise JuniperMultipleTerminatingActionError(
+      raise NokiaMultipleTerminatingActionError(
           'The following term has multiple terminating actions: %s' %
           self.term.name)
 
@@ -574,7 +559,7 @@ class Nokia(aclgenerator.ACLGenerator):
           term.name = self.FixTermLength(term.name)
 
           if term.name in term_names:
-            raise JuniperDuplicateTermError('You have multiple terms named: %s' %
+            raise NokiaDuplicateTermError('You have multiple terms named: %s' %
                                             term.name)
           term_names.add(term.name)
 

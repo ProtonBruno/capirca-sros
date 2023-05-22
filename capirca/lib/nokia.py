@@ -108,12 +108,49 @@ class Term(aclgenerator.Term):
   _TERM_TYPE = {'inet': {'addr': 'ip ip-prefix-list',
                          'saddr': 'src-ip ip-prefix-list',
                          'daddr': 'dst-ip ip-prefix-list',
-                         'protocol': 'protocol'},
+                         'protocol': 'protocol',
+                         'protocol-list': 'protocol-list'},
                 'inet6': {'addr': 'ip ipv6-prefix-list',
                           'saddr': 'src-ip ipv6-prefix-list',
                           'daddr': 'dst-ip ipv6-prefix-list',
-                          'protocol': 'next-header'},
+                          'protocol': 'next-header',
+                          'protocol-list': 'next-header-list'},
                }
+  _PROTOCOL_REV_MAP = {
+                         1: 'icmp',
+                         2: 'igmp',
+                         4: 'ip',
+                         6: 'tcp',
+                         8: 'egp',
+                         9: 'igp',
+                        17: 'udp',
+                        27: 'rdp',
+                        41: 'ipv6',
+                        43: 'ipv6-route',
+                        44: 'ipv6-frag',
+                        45: 'idrp',
+                        46: 'rsvp',
+                        47: 'gre',
+                        58: 'ipv6-icmp',
+                        59: 'ipv6-no-nxt',
+                        60: 'ipv6-opts',
+                        80: 'iso-ip',
+                        88: 'eigrp',
+                        89: 'ospf-igp',
+                        97: 'etherip',
+                        98: 'encap',
+                       102: 'pnni',
+                       103: 'pim',
+                       112: 'vrrp',
+                       115: 'l2tp',
+                       118: 'stp',
+                       112: 'vrrp',
+                       123: 'ptp',
+                       124: 'isis',
+                       126: 'crtp',
+                       127: 'crudp',
+                       132: 'sctp',
+                      }
 
   def __init__(self, term, term_type, filter_name, entry_number):
     super().__init__(term)
@@ -136,7 +173,7 @@ class Term(aclgenerator.Term):
                          srcport=None,
                          dstport=None,
                          icmp_type=None):
-    subcontext = "/configure " + self.context + ' entry %d' % (self.entry_number + self.entry_offset)
+    subcontext = '/configure %s entry %d' % (self.context, self.entry_number + self.entry_offset)
     description = []
     if prefix:
       description.append("prefix %s" % prefix)
@@ -181,6 +218,7 @@ class Term(aclgenerator.Term):
       config.Append(subcontext + ' match %s' % criterium)
     for option in self.entry_options:
       config.Append(subcontext + ' %s' % option)
+
     # FIXME full action matching
     config.Append(subcontext + ' action %s' % (self.ACTIONS[self.term.action[0]]))
     self.entry_offset += 1
@@ -239,10 +277,9 @@ class Term(aclgenerator.Term):
         # if tcp-established specified, but more than just tcp is included
         # in the protocols, raise an error
         elif opt.startswith('tcp-established'):
-          flag = self.family_keywords['tcp-est']
           if self.term.protocol == ['tcp']:
-            if flag not in match_criteria:
-              match_criteria.append(flag)
+            if 'tcp-established' not in match_criteria:
+              match_criteria.append('tcp-established')
           else:
             raise TcpEstablishedWithNonTcpError(
                 'tcp-established can only be used with tcp protocol in term %s'
@@ -302,21 +339,19 @@ class Term(aclgenerator.Term):
 
       # protocol
       if self.term.protocol:
-        # both are supported on JunOS, but only icmp6 is supported
-        # on SRX loopback stateless filter, so set all instances of icmpv6 to icmp6.
-        if set(self.term.protocol) == {'icmpv6' } or set(self.term.protocol) == {'icmp6'}:
-          self.term.protocol = ['ipv6-icmp']
+        # Nokia supports only one protocol, but to get around this, they added
+        # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
         if set(self.term.protocol) == {'tcp', 'udp'}:
           self.term.protocol = ['tcp-udp']
-        # FIXME No mapping for 'ah' and 'esp' 
-        if 'ah' in self.term.protocol or 'esp' in self.term.protocol:
-          return ''
 
-        # FIXME implement protocol-list for multi-protocol
-        if len(self.term.protocol) > 1):
-          return ''
+        # If we still have one protocol left, add it as match criteria
+        if len(self.term.protocol) == 1:
+          match_criteria.append("%s %s" % (self.family_keywords['protocol'], self.term.protocol[0]))
+        # If we have multiple protocols, create and reference a protocol list
+        else:
+          # We're already warning for the 32 char limit
+          match_criteria.append("%s %s" % (self.family_keywords['protocol-list'], ("%s_%s" % (self.filter_name, self.term.name))[:32]))
 
-        match_criteria.append(self.family_keywords['protocol'] + ' ' + self.term.protocol[0])
 
       # DSCP Match
       if self.term.dscp_match:
@@ -429,6 +464,7 @@ class Nokia(aclgenerator.ACLGenerator):
   def __init__(self, pol, exp_info):
     self.prefixlists = collections.OrderedDict()
     self.portlists = collections.OrderedDict()
+    self.protocollists = collections.OrderedDict()
     self.entry_number = 0
     super().__init__(pol, exp_info)
 
@@ -475,6 +511,18 @@ class Nokia(aclgenerator.ACLGenerator):
             'inactive'}
          })
     return supported_tokens, supported_sub_tokens
+
+  def _BuildProtocolList(self, protocollist, filter_name, term):
+    new_list = []
+    for protocol in protocollist:
+      # Convert to numeric if possible
+      if self._TERM.PROTO_MAP[protocol] in self._TERM._PROTOCOL_REV_MAP:
+        protocol = self._TERM._PROTOCOL_REV_MAP[self._TERM.PROTO_MAP[protocol]]
+      else:
+        protocol = self._TERM.PROTO_MAP[protocol]
+      new_list.append(protocol)
+
+    self.protocollists[("%s_%s" % (filter_name, term.name))[:32]] = new_list
 
   def _BuildPortList(self, portlist, protocol, term_name):
     self.portlists[portlist] = TranslatePorts([portlist], protocol, term_name)
@@ -625,11 +673,26 @@ class Nokia(aclgenerator.ACLGenerator):
             for portlist in term.destination_port_names:
               self._BuildPortList(portlist, term.protocol, term.name)
 
+          if len(term.protocol) > 1 and set(term.protocol) != {'tcp', 'udp'}:
+            self._BuildProtocolList(term.protocol, filter_name, term)
+
+
           self.entry_number += 10000
           new_terms.append(self._TERM(term, filter_type, filter_name, self.entry_number))
 
         self.nokia_filters.append((header, filter_name + filter_name_suffix, filter_type,
                                      new_terms))
+
+  def _GenerateProtocolLists(self, config):
+    names = sorted(self.protocollists.keys())
+    for name in names:
+      if len(name) > 32:
+        logging.warning('WARNING: Protocol list name "%s"  is too long and will be cropped to "%s"' % (name[:32]))
+
+      config.Append('delete filter match-list protocol-list %s' % name[:32])
+
+      for protocol in self.protocollists[name]:
+        config.Append("/configure filter match-list protocol-list %s protocol %s" % (name[:32], protocol))
 
   def _GeneratePortLists(self, config):
     """Creates filter match-list port-list."""
@@ -639,7 +702,7 @@ class Nokia(aclgenerator.ACLGenerator):
       if len(name) > 32:
         logging.warning('WARNING: Port list name "%s"  is too long and will be cropped to "%s"' % (name, name[:32]))
 
-      config.Append('delete filter match-list port-list ' + name[:32])
+      config.Append('delete filter match-list port-list %s' % name[:32])
       for port in self.portlists[name]:
         if port[0] != port[1]:
           config.Append("/configure filter match-list port-list %s range start %d end %d" % (name[:32], port[0],port[1]))
@@ -654,8 +717,8 @@ class Nokia(aclgenerator.ACLGenerator):
       if len(name) > 32:
         logging.warning('WARNING: Prefix list name "%s"  is too long and will be cropped to "%s"' % (name, name[:32]))
 
-      config.Append('delete filter match-list ip-prefix-list ' + name[:32])
-      config.Append('delete filter match-list ipv6-prefix-list ' + name[:32])
+      config.Append('delete filter match-list ip-prefix-list %s' % name[:32])
+      config.Append('delete filter match-list ipv6-prefix-list %s' % name[:32])
       ips = nacaddr.SortAddrList(self.prefixlists[name])
       ips = nacaddr.CollapseAddrList(ips)
       self.prefixlists[name] = ips
@@ -667,6 +730,7 @@ class Nokia(aclgenerator.ACLGenerator):
 
   def __str__(self):
     config = Config()
+    self._GenerateProtocolLists(config)
     self._GeneratePrefixLists(config)
     self._GeneratePortLists(config)
 
@@ -674,7 +738,7 @@ class Nokia(aclgenerator.ACLGenerator):
         ) in self.nokia_filters:
 
       cli_path = 'filter %s %s' % ("ip-filter" if filter_type == 'inet' else 'ipv6-filter', filter_name )
-      config.Append('delete ' + cli_path)
+      config.Append('delete %s' % cli_path)
 
       # FIXME filter-id has collisions n in 2^16 where n is number of filters
       config.Append('/configure %s filter-id %d' % (cli_path, crc_hqx(filter_name.encode('utf-8'),0)))

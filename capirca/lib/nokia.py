@@ -346,7 +346,14 @@ class Term(aclgenerator.Term):
 
         # If we still have one protocol left, add it as match criteria
         if len(self.term.protocol) == 1:
-          match_criteria.append("%s %s" % (self.family_keywords['protocol'], self.term.protocol[0]))
+          protocol = self.term.protocol[0]
+          if protocol != 'tcp-udp':
+            if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
+              protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]
+            else:
+              protocol = self.PROTO_MAP[protocol]
+
+          match_criteria.append("%s %s" % (self.family_keywords['protocol'], protocol))
         # If we have multiple protocols, create and reference a protocol list
         else:
           # We're already warning for the 32 char limit

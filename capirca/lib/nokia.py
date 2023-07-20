@@ -194,7 +194,7 @@ class Term(aclgenerator.Term):
       description.append("port %s" % port)
 
     if icmp_type:
-      description.append("icmp-type %s" % icmp_type)
+      description.append("icmp type %s" % icmp_type)
 
     config = self.config
     description = ("term %s (%s)" % (self.term.name, " ".join(description)))[:80]
@@ -207,7 +207,7 @@ class Term(aclgenerator.Term):
       config.Append(subcontext + ' match %s %s' % (self.family_keywords['daddr'], dstprefix[:32]))
 
     if icmp_type:
-      config.Append(subcontext + ' match icmp-type %s' % icmp_type)
+      config.Append(subcontext + ' match icmp type %s' % icmp_type)
     if port:
       config.Append(subcontext + ' match port port-list %s' % port)
     if srcport:
@@ -335,7 +335,7 @@ class Term(aclgenerator.Term):
 
       # ICMP code (With only single icmp type hopefully)
       if self.term.icmp_code:
-        match_criteria.append('icmp-code %s' % self.term.icmp_code)
+        match_criteria.append('icmp code %s' % self.term.icmp_code)
 
       # protocol
       if self.term.protocol:

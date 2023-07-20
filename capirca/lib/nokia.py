@@ -581,6 +581,15 @@ class Nokia(aclgenerator.ACLGenerator):
       else:
         filter_types_to_process = [filter_type]
 
+      scope = "template"
+      if len(filter_options) > 2:
+        scope = filter_options[2]
+
+      chain_to_system = not "no-chain-to-system" in filter_options[2:]
+
+      if scope == "system":
+        chain_to_system = False
+
       for filter_type in filter_types_to_process:
 
         filter_name_suffix = ''
@@ -680,7 +689,7 @@ class Nokia(aclgenerator.ACLGenerator):
           self.entry_number += 10000
           new_terms.append(self._TERM(term, filter_type, filter_name, self.entry_number))
 
-        self.nokia_filters.append((header, filter_name + filter_name_suffix, filter_type,
+        self.nokia_filters.append((header, filter_name + filter_name_suffix, filter_type, scope, chain_to_system,
                                      new_terms))
 
   def _GenerateProtocolLists(self, config):
@@ -734,11 +743,14 @@ class Nokia(aclgenerator.ACLGenerator):
     self._GeneratePrefixLists(config)
     self._GeneratePortLists(config)
 
-    for (header, filter_name, filter_type, terms
+    for (header, filter_name, filter_type, scope, chain_to_system, terms
         ) in self.nokia_filters:
 
       cli_path = 'filter %s %s' % ("ip-filter" if filter_type == 'inet' else 'ipv6-filter', filter_name )
       config.Append('delete %s' % cli_path)
+
+      config.Append('/configure %s scope %s' % (cli_path, scope))
+      config.Append('/configure %s chain-to-system-filter %s' % (cli_path, "true" if chain_to_system else "false"))
 
       # FIXME filter-id has collisions n in 2^16 where n is number of filters
       config.Append('/configure %s filter-id %d' % (cli_path, crc_hqx(filter_name.encode('utf-8'),0)))

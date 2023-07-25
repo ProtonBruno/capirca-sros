@@ -577,7 +577,7 @@ class Nokia(aclgenerator.ACLGenerator):
     self.portlists[portlist + "-" + protocol] = translatedlist
 
 
-  def _BuildNamedPrefixList(self, name, address, exclude):
+  def _BuildNamedPrefixList(self, name, address, exclude=False):
     """Create the prefix list configuration entries.
 
     Args:
@@ -589,9 +589,11 @@ class Nokia(aclgenerator.ACLGenerator):
       self.prefixlists_ex[name] = []
 
     if exclude:
-      self.prefixlists_ex[name].append(address)
+      if not address in self.prefixlists_ex[name]:
+        self.prefixlists_ex[name].append(address)
     else:
-      self.prefixlists[name].append(address)
+      if not address in self.prefixlists[name]:
+        self.prefixlists[name].append(address)
 
   def _SortPrefixListNumCheck(self, item):
     """Used to give a natural order to the list of acl entries.
@@ -613,7 +615,7 @@ class Nokia(aclgenerator.ACLGenerator):
       return (alpha, int(num))
     return (alpha, 0)
 
-  def PopulatePrefixList(self, filter_type, filter_name, term_name, addresses, excludes, suffix):
+  def _PopulatePrefixList(self, filter_type, filter_name, term_name, addresses, excludes, suffix):
     valid_addrs = []
     valid_exclude = []
     for addr in addresses:
@@ -627,21 +629,24 @@ class Nokia(aclgenerator.ACLGenerator):
       logging.warning(
         'WARNING: Term %s has 0 valid source IPs, skipping.', term_name)
       return
+
     if len(valid_exclude):
       prefixlist_basename = ("%s-%s" % (filter_name, term_name))[:32-len(suffix)]
       prefixlist_name = "%s%s" % (prefixlist_basename, suffix)
-    else:
-      prefixlist_name = valid_addrs[0].parent_token
 
     if not len(valid_addrs) and filter_type == "inet":
-      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv4("0.0.0.0/0", comment="any"), False)
+      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv4("0.0.0.0/0", comment="any"), exclude=False)
     if not len(valid_addrs) and filter_type == "inet6":
-      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv6("2000::/3", comment="any"), False)
+      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv6("2000::/3", comment="any"), exclude=False)
 
-    for addr in valid_addrs:
-      self._BuildNamedPrefixList(prefixlist_name, addr, False)
+    if len(valid_exclude):
+      for addr in valid_addrs:
+        self._BuildNamedPrefixList(prefixlist_name, addr, exclude=False)
+    else:
+      for addr in valid_addrs:
+        self._BuildNamedPrefixList(addr.parent_token, addr, exclude=False)
     for addr in valid_exclude:
-      self._BuildNamedPrefixList(prefixlist_name, addr, True)
+      self._BuildNamedPrefixList(prefixlist_name, addr, exclude=True)
 
   def _TranslatePolicy(self, pol, exp_info):
     self.nokia_filters = []
@@ -712,21 +717,20 @@ class Nokia(aclgenerator.ACLGenerator):
 
           # Filter address based on filter_type & add to prefix-list
           if term.address or term.address_exclude:
-            self.PopulatePrefixList(filter_type, filter_name, term.name, term.address, term.address_exclude, "-addr")
+            self._PopulatePrefixList(filter_type, filter_name, term.name, term.address, term.address_exclude, "-addr")
 
           # Filter source_address based on filter_type & add to prefix-list
           if term.source_address or term.source_address_exclude:
-            self.PopulatePrefixList(filter_type, filter_name, term.name, term.source_address, term.source_address_exclude, "-src")
+            self._PopulatePrefixList(filter_type, filter_name, term.name, term.source_address, term.source_address_exclude, "-src")
 
           # Filter destination_address based on filter_type & add to prefix-list
           if term.destination_address or term.destination_address_exclude:
-            self.PopulatePrefixList(filter_type, filter_name, term.name, term.destination_address, term.destination_address_exclude, "-dst")
+            self._PopulatePrefixList(filter_type, filter_name, term.name, term.destination_address, term.destination_address_exclude, "-dst")
 
           if term.port_names:
             for portlist in term.port_names:
               for protocol in term.protocol:
                 self._BuildPortList(portlist, protocol, term.name)
-
           if term.source_port_names:
             for portlist in term.source_port_names:
               for protocol in term.protocol:
@@ -788,6 +792,7 @@ class Nokia(aclgenerator.ACLGenerator):
       exclude_ips = nacaddr.CollapseAddrList(exclude_ips)
       self.prefixlists[name] = ips
       self.prefixlists_ex[name] = exclude_ips
+
       # Write out prefix lists
       for ip in self.prefixlists[name]:
         # Nokia workaround for 0.0.0.0/0 in prefix list, expands to 2 /31s, IPv6 works with 2000::/3

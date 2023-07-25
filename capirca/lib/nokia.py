@@ -306,8 +306,10 @@ class Term(aclgenerator.Term):
 
     # a default action term doesn't have any from { clause
     has_match_criteria = (self.term.address or
+                          self.term.address_exclude or
                           self.term.dscp_match or
                           self.term.destination_address or
+                          self.term.destination_address_exclude or
                           self.term.destination_port or
                           self.term.destination_prefix or
                           self.term.ether_type or
@@ -319,6 +321,7 @@ class Term(aclgenerator.Term):
                           self.term.port or
                           self.term.protocol or
                           self.term.source_address or
+                          self.term.source_address_exclude or
                           self.term.source_port or
                           self.term.source_prefix or
                           self.term.ttl)
@@ -365,23 +368,43 @@ class Term(aclgenerator.Term):
         match_criteria.append('dscp %s' % ' '.join(self.term.dscp_match))
 
 
-      # FIXME Juniper flexible-match bullshit, make something that's actually supported in juniper and nokia
+      # FIXME Make logic for forward-when, discard-when and rate-limit with bit-patterns (flexible-match-mask)
+      # FIXME Juniper flexible-match verbatim bullshit, make something that's actually supported in juniper and nokia
       if self.term.flexible_match_range:
         config.Append('flexible-match-range {')
         for fm_opt in self.term.flexible_match_range:
           config.Append('%s %s;' % (fm_opt[0], fm_opt[1]))
 
       #
+      # Workaround Nokia's for 1 prefix list per entry
       # Annoyingly on nokia, one entry can have exactly one prefix list, so this requires a split
       # The upside is of course getting many many counters
       #
       address = self.term.GetAddressOfVersion('address', term_af)
+      address_ex = self.term.GetAddressOfVersion('address_exclude', term_af)
       src_addr = self.term.GetAddressOfVersion('source_address', term_af)
+      src_addr_ex = self.term.GetAddressOfVersion('source_address_exclude', term_af)
       dst_addr = self.term.GetAddressOfVersion('destination_address', term_af)
+      dst_addr_ex = self.term.GetAddressOfVersion('destination_address_exclude', term_af)
 
       address_prefixlists = sorted(set([x.parent_token for x in address]))
       src_prefixlists = sorted(set([x.parent_token for x in src_addr]))
       dst_prefixlists = sorted(set([x.parent_token for x in dst_addr]))
+
+      # Workaround for Nokia not being able to do prefix-list .. exclude in an entry. Refer to the prefix-list for the term
+      if len(address_ex):
+        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-addr")]
+        prefixlist_name = "%s%s" % (prefixlist_basename, "-addr")
+        address_prefixlists = [ prefixlist_name ]
+      if len(src_addr_ex):
+        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-src")]
+        prefixlist_name = "%s%s" % (prefixlist_basename, "-src")
+        src_prefixlists = [ prefixlist_name ]
+      if len(dst_addr_ex):
+        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-dst")]
+        prefixlist_name = "%s%s" % (prefixlist_basename, "-dst")
+        dst_prefixlists = [ prefixlist_name ]
+
 
       icmp_types = []
       if self.term.icmp_type:
@@ -423,7 +446,6 @@ class Term(aclgenerator.Term):
 
     # FIXME implement log facility (numeric)
     # FIXME implement non-named rate-limit facility rate-limit pir / pps-pir
-    # FIXME Make logic for forward-when, discard-when and rate-limit with bit-patterns
 
 
     self.CheckTerminatingAction()
@@ -470,6 +492,7 @@ class Nokia(aclgenerator.ACLGenerator):
 
   def __init__(self, pol, exp_info):
     self.prefixlists = collections.OrderedDict()
+    self.prefixlists_ex = collections.OrderedDict()
     self.portlists = collections.OrderedDict()
     self.protocollists = collections.OrderedDict()
     self.entry_number = 0
@@ -534,16 +557,22 @@ class Nokia(aclgenerator.ACLGenerator):
   def _BuildPortList(self, portlist, protocol, term_name):
     self.portlists[portlist] = TranslatePorts([portlist], protocol, term_name)
 
-  def _BuildPrefixList(self, address):
+
+  def _BuildNamedPrefixList(self, name, address, exclude):
     """Create the prefix list configuration entries.
 
     Args:
       address: a naming library address object
     """
-    name = address.parent_token
     if name not in self.prefixlists:
       self.prefixlists[name] = []
-    self.prefixlists[name].append(address)
+    if name not in self.prefixlists_ex:
+      self.prefixlists_ex[name] = []
+
+    if exclude:
+      self.prefixlists_ex[name].append(address)
+    else:
+      self.prefixlists[name].append(address)
 
   def _SortPrefixListNumCheck(self, item):
     """Used to give a natural order to the list of acl entries.
@@ -564,6 +593,36 @@ class Nokia(aclgenerator.ACLGenerator):
     if num:
       return (alpha, int(num))
     return (alpha, 0)
+
+  def PopulatePrefixList(self, filter_type, filter_name, term_name, addresses, excludes, suffix):
+    valid_addrs = []
+    valid_exclude = []
+    for addr in addresses:
+      if addr.version in self._AF_MAP[filter_type]:
+        valid_addrs.append(addr)
+    for addr in excludes:
+      if addr.version in self._AF_MAP[filter_type]:
+        valid_exclude.append(addr)
+
+    if not len(valid_addrs) and not len(valid_exclude):
+      logging.warning(
+        'WARNING: Term %s has 0 valid source IPs, skipping.', term_name)
+      return
+    if len(valid_exclude):
+      prefixlist_basename = ("%s-%s" % (filter_name, term_name))[:32-len(suffix)]
+      prefixlist_name = "%s%s" % (prefixlist_basename, suffix)
+    else:
+      prefixlist_name = valid_addrs[0].parent_token
+
+    if not len(valid_addrs) and filter_type == "inet":
+      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv4("0.0.0.0/0", comment="any"), False)
+    if not len(valid_addrs) and filter_type == "inet6":
+      self._BuildNamedPrefixList(prefixlist_name, nacaddr.IPv6("2000::/3", comment="any"), False)
+
+    for addr in valid_addrs:
+      self._BuildNamedPrefixList(prefixlist_name, addr, False)
+    for addr in valid_exclude:
+      self._BuildNamedPrefixList(prefixlist_name, addr, True)
 
   def _TranslatePolicy(self, pol, exp_info):
     self.nokia_filters = []
@@ -599,14 +658,6 @@ class Nokia(aclgenerator.ACLGenerator):
 
       for filter_type in filter_types_to_process:
 
-        filter_name_suffix = ''
-#        # If mixed filter_type, will append 4 or 6 to the filter name
-#        if len(filter_types_to_process) > 1:
-#          if filter_type == 'inet':
-#            filter_name_suffix = '4'
-#          if filter_type == 'inet6':
-#            filter_name_suffix = '6'
-
         term_names = set()
         new_terms = []
         for term in terms:
@@ -641,43 +692,16 @@ class Nokia(aclgenerator.ACLGenerator):
               continue
 
           # Filter address based on filter_type & add to prefix-list
-          if term.address:
-            valid_addrs = []
-            for addr in term.address:
-              if addr.version in self._AF_MAP[filter_type]:
-                valid_addrs.append(addr)
-            if not valid_addrs:
-              logging.warning(
-                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
-              continue
-            for addr in valid_addrs:
-              self._BuildPrefixList(addr)
+          if term.address or term.address_exclude:
+            self.PopulatePrefixList(filter_type, filter_name, term.name, term.address, term.address_exclude, "-addr")
 
           # Filter source_address based on filter_type & add to prefix-list
-          if term.source_address:
-            valid_addrs = []
-            for addr in term.source_address:
-              if addr.version in self._AF_MAP[filter_type]:
-                valid_addrs.append(addr)
-            if not valid_addrs:
-              logging.warning(
-                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
-              continue
-            for addr in valid_addrs:
-              self._BuildPrefixList(addr)
+          if term.source_address or term.source_address_exclude:
+            self.PopulatePrefixList(filter_type, filter_name, term.name, term.source_address, term.source_address_exclude, "-src")
 
           # Filter destination_address based on filter_type & add to prefix-list
-          if term.destination_address:
-            valid_addrs = []
-            for addr in term.destination_address:
-              if addr.version in self._AF_MAP[filter_type]:
-                valid_addrs.append(addr)
-            if not valid_addrs:
-              logging.warning(
-                'WARNING: Term %s has 0 valid source IPs, skipping.', term.name)
-              continue
-            for addr in valid_addrs:
-              self._BuildPrefixList(addr)
+          if term.destination_address or term.destination_address_exclude:
+            self.PopulatePrefixList(filter_type, filter_name, term.name, term.destination_address, term.destination_address_exclude, "-dst")
 
           if term.port_names:
             for portlist in term.port_names:
@@ -696,7 +720,7 @@ class Nokia(aclgenerator.ACLGenerator):
           self.entry_number += 10000
           new_terms.append(self._TERM(term, filter_type, filter_name, self.entry_number))
 
-        self.nokia_filters.append((header, filter_name + filter_name_suffix, filter_type, scope, chain_to_system,
+        self.nokia_filters.append((header, filter_name, filter_type, scope, chain_to_system,
                                      new_terms))
 
   def _GenerateProtocolLists(self, config):
@@ -737,9 +761,28 @@ class Nokia(aclgenerator.ACLGenerator):
       config.Append('delete filter match-list ipv6-prefix-list %s' % name[:32])
       ips = nacaddr.SortAddrList(self.prefixlists[name])
       ips = nacaddr.CollapseAddrList(ips)
+      exclude_ips = nacaddr.SortAddrList(self.prefixlists_ex[name])
+      exclude_ips = nacaddr.CollapseAddrList(exclude_ips)
       self.prefixlists[name] = ips
+      self.prefixlists_ex[name] = exclude_ips
+      if len(exclude_ips):
+      # Write out prefix lists
       for ip in self.prefixlists[name]:
-        cli_path = "filter match-list %s %s prefix %s" % ("ipv6-prefix-list" if ip.version == 6 else "ip-prefix-list", name[:32], str(ip))
+        # Nokia workaround for 0.0.0.0/0 in prefix list, expands to 2 /31s, IPv6 works with 2000::/3
+        if str(ip) == "0.0.0.0/0":
+          write_ips = [ "0.0.0.0/1", "128.0.0.0/1" ]
+        else:
+          write_ips = [ str(ip) ]
+
+        for write_ip in write_ips:
+          cli_path = "filter match-list %s %s prefix %s" % ("ipv6-prefix-list" if ip.version == 6 else "ip-prefix-list", name[:32], write_ip)
+          config.Append('/configure %s' % cli_path)
+          if ip.text:
+            config.Append('annotate "%s" cli-path %s' % (ip.text.replace("\n", "\\n"), cli_path))
+
+      # Write out excludes
+      for ip in self.prefixlists_ex[name]:
+        cli_path = "filter match-list %s %s prefix-exclude %s" % ("ipv6-prefix-list" if ip.version == 6 else "ip-prefix-list", name[:32], str(ip))
         config.Append('/configure %s' % cli_path)
         if ip.text:
           config.Append('annotate "%s" cli-path %s' % (ip.text.replace("\n", "\\n"), cli_path))

@@ -152,9 +152,10 @@ class Term(aclgenerator.Term):
                        132: 'sctp',
                       }
 
-  def __init__(self, term, term_type, filter_name, entry_number):
+  def __init__(self, term, parent, term_type, filter_name, entry_number):
     super().__init__(term)
     self.term = term
+    self.parent = parent
     self.term_type = term_type
     self.filter_name = filter_name
     self.entry_number = entry_number
@@ -340,28 +341,6 @@ class Term(aclgenerator.Term):
       if self.term.icmp_code:
         match_criteria.append('icmp code %s' % self.term.icmp_code)
 
-      # protocol
-      if self.term.protocol:
-        # Nokia supports only one protocol, but to get around this, they added
-        # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
-        if set(self.term.protocol) == {'tcp', 'udp'}:
-          self.term.protocol = ['tcp-udp']
-
-        # If we still have one protocol left, add it as match criteria
-        if len(self.term.protocol) == 1:
-          protocol = self.term.protocol[0]
-          if protocol != 'tcp-udp':
-            if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
-              protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]
-            else:
-              protocol = self.PROTO_MAP[protocol]
-
-          match_criteria.append("%s %s" % (self.family_keywords['protocol'], protocol))
-        # If we have multiple protocols, create and reference a protocol list
-        else:
-          # We're already warning for the 32 char limit
-          match_criteria.append("%s %s" % (self.family_keywords['protocol-list'], ("%s_%s" % (self.filter_name, self.term.name))[:32]))
-
 
       # DSCP Match
       if self.term.dscp_match:
@@ -418,6 +397,42 @@ class Term(aclgenerator.Term):
       if self.term.destination_prefix:
         dst_prefixlists.extend(self.term.destination_prefix)
 
+      # port name mapping to tcp/udp-specific port lists
+      port_names = []
+      source_port_names = []
+      destination_port_names = []
+      for protocol in self.term.protocol:
+        port_names.extend(["%s-%s" % (x, protocol) for x in self.term.port_names])
+        source_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.source_port_names])
+        destination_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.destination_port_names])
+
+      # Remove empty protocols (for instance tcp where there is no tcp in the ports)
+      port_names = [x for x in port_names if x in self.parent.portlists]
+      source_port_names = [x for x in source_port_names if x in self.parent.portlists]
+      destination_port_names = [x for x in destination_port_names if x in self.parent.portlists]
+
+      # protocol
+      if self.term.protocol:
+        # Nokia supports only one protocol, but to get around this, they added
+        # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
+        if set(self.term.protocol) == {'tcp', 'udp'}:
+          self.term.protocol = ['tcp-udp']
+
+        # If we still have one protocol left, add it as match criteria
+        if len(self.term.protocol) == 1:
+          protocol = self.term.protocol[0]
+          if protocol != 'tcp-udp':
+            if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
+              protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]
+            else:
+              protocol = self.PROTO_MAP[protocol]
+
+          match_criteria.append("%s %s" % (self.family_keywords['protocol'], protocol))
+        # If we have multiple protocols, create and reference a protocol list
+        else:
+          # We're already warning for the 32 char limit
+          match_criteria.append("%s %s" % (self.family_keywords['protocol-list'], ("%s_%s" % (self.filter_name, self.term.name))[:32]))
+
       # [None] is the neutral list (1) for itertools.product()
       if not len(address_prefixlists):
         address_prefixlists = [None]
@@ -427,20 +442,20 @@ class Term(aclgenerator.Term):
         dst_prefixlists = [None]
       if not len(icmp_types):
         icmp_types = [None]
-      if not len(self.term.port_names):
-        self.term.port_names = [None]
-      if not len(self.term.source_port_names):
-        self.term.source_port_names = [None]
-      if not len(self.term.destination_port_names):
-        self.term.destination_port_names = [None]
+      if not len(port_names):
+        port_names = [None]
+      if not len(source_port_names):
+        source_port_names = [None]
+      if not len(destination_port_names):
+        destination_port_names = [None]
 
       # Create a full product of all lists
       for manytuple in product(address_prefixlists,
                                src_prefixlists,
                                dst_prefixlists,
-                               self.term.port_names,
-                               self.term.source_port_names,
-                               self.term.destination_port_names,
+                               port_names,
+                               source_port_names,
+                               destination_port_names,
                                icmp_types):
         self._write_entry(*manytuple)
 
@@ -555,7 +570,11 @@ class Nokia(aclgenerator.ACLGenerator):
     self.protocollists[("%s_%s" % (filter_name, term.name))[:32]] = new_list
 
   def _BuildPortList(self, portlist, protocol, term_name):
-    self.portlists[portlist] = TranslatePorts([portlist], protocol, term_name)
+    translatedlist = TranslatePorts([portlist], [protocol], term_name)
+    if not translatedlist:
+      return
+
+    self.portlists[portlist + "-" + protocol] = translatedlist
 
 
   def _BuildNamedPrefixList(self, name, address, exclude):
@@ -705,20 +724,24 @@ class Nokia(aclgenerator.ACLGenerator):
 
           if term.port_names:
             for portlist in term.port_names:
-              self._BuildPortList(portlist, term.protocol, term.name)
+              for protocol in term.protocol:
+                self._BuildPortList(portlist, protocol, term.name)
+
           if term.source_port_names:
             for portlist in term.source_port_names:
-              self._BuildPortList(portlist, term.protocol, term.name)
+              for protocol in term.protocol:
+                self._BuildPortList(portlist, protocol, term.name)
           if term.destination_port_names:
             for portlist in term.destination_port_names:
-              self._BuildPortList(portlist, term.protocol, term.name)
+              for protocol in term.protocol:
+                self._BuildPortList(portlist, protocol, term.name)
 
           if len(term.protocol) > 1 and set(term.protocol) != {'tcp', 'udp'}:
             self._BuildProtocolList(term.protocol, filter_name, term)
 
 
           self.entry_number += 10000
-          new_terms.append(self._TERM(term, filter_type, filter_name, self.entry_number))
+          new_terms.append(self._TERM(term, self, filter_type, filter_name, self.entry_number))
 
         self.nokia_filters.append((header, filter_name, filter_type, scope, chain_to_system,
                                      new_terms))
@@ -765,7 +788,6 @@ class Nokia(aclgenerator.ACLGenerator):
       exclude_ips = nacaddr.CollapseAddrList(exclude_ips)
       self.prefixlists[name] = ips
       self.prefixlists_ex[name] = exclude_ips
-      if len(exclude_ips):
       # Write out prefix lists
       for ip in self.prefixlists[name]:
         # Nokia workaround for 0.0.0.0/0 in prefix list, expands to 2 /31s, IPv6 works with 2000::/3

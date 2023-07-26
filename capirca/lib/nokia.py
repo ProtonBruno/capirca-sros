@@ -305,165 +305,140 @@ class Term(aclgenerator.Term):
 
 
 
-    # a default action term doesn't have any from { clause
-    has_match_criteria = (self.term.address or
-                          self.term.address_exclude or
-                          self.term.dscp_match or
-                          self.term.destination_address or
-                          self.term.destination_address_exclude or
-                          self.term.destination_port or
-                          self.term.destination_prefix or
-                          self.term.ether_type or
-                          self.term.flexible_match_range or
-                          self.term.forwarding_class or
-                          self.term.fragment_offset or
-                          self.term.hop_limit or
-                          self.term.next_ip or
-                          self.term.port or
-                          self.term.protocol or
-                          self.term.source_address or
-                          self.term.source_address_exclude or
-                          self.term.source_port or
-                          self.term.source_prefix or
-                          self.term.ttl)
-
     entry_offset = 0
-    if has_match_criteria:
 
-      # Only generate ttl if inet, inet6 uses hop-limit instead.
-      if self.term.ttl and self.term_type == 'inet':
-        match_criteria.append('ttl lt %s;' % self.term.ttl)
-      # Only generate a hop-limit if inet6, inet4 has no hop-limit.
-      if self.term.hop_limit and self.term_type == 'inet6':
-        match_criteria.append('hop-limit lt %s' % (self.term.hop_limit))
+    # Only generate ttl if inet, inet6 uses hop-limit instead.
+    if self.term.ttl and self.term_type == 'inet':
+      match_criteria.append('ttl lt %s;' % self.term.ttl)
+    # Only generate a hop-limit if inet6, inet4 has no hop-limit.
+    if self.term.hop_limit and self.term_type == 'inet6':
+      match_criteria.append('hop-limit lt %s' % (self.term.hop_limit))
 
-      # ICMP code (With only single icmp type hopefully)
-      if self.term.icmp_code:
-        match_criteria.append('icmp code %s' % self.term.icmp_code)
-
-
-      # DSCP Match
-      if self.term.dscp_match:
-        match_criteria.append('dscp %s' % ' '.join(self.term.dscp_match))
+    # ICMP code (With only single icmp type hopefully)
+    if self.term.icmp_code:
+      match_criteria.append('icmp code %s' % self.term.icmp_code)
 
 
-      # FIXME Make logic for forward-when, discard-when and rate-limit with bit-patterns (flexible-match-mask)
-      # FIXME Juniper flexible-match verbatim bullshit, make something that's actually supported in juniper and nokia
-      if self.term.flexible_match_range:
-        config.Append('flexible-match-range {')
-        for fm_opt in self.term.flexible_match_range:
-          config.Append('%s %s;' % (fm_opt[0], fm_opt[1]))
-
-      #
-      # Workaround Nokia's for 1 prefix list per entry
-      # Annoyingly on nokia, one entry can have exactly one prefix list, so this requires a split
-      # The upside is of course getting many many counters
-      #
-      address = self.term.GetAddressOfVersion('address', term_af)
-      address_ex = self.term.GetAddressOfVersion('address_exclude', term_af)
-      src_addr = self.term.GetAddressOfVersion('source_address', term_af)
-      src_addr_ex = self.term.GetAddressOfVersion('source_address_exclude', term_af)
-      dst_addr = self.term.GetAddressOfVersion('destination_address', term_af)
-      dst_addr_ex = self.term.GetAddressOfVersion('destination_address_exclude', term_af)
-
-      address_prefixlists = sorted(set([x.parent_token for x in address]))
-      src_prefixlists = sorted(set([x.parent_token for x in src_addr]))
-      dst_prefixlists = sorted(set([x.parent_token for x in dst_addr]))
-
-      # Workaround for Nokia not being able to do prefix-list .. exclude in an entry. Refer to the prefix-list for the term
-      if len(address_ex):
-        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-addr")]
-        prefixlist_name = "%s%s" % (prefixlist_basename, "-addr")
-        address_prefixlists = [ prefixlist_name ]
-      if len(src_addr_ex):
-        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-src")]
-        prefixlist_name = "%s%s" % (prefixlist_basename, "-src")
-        src_prefixlists = [ prefixlist_name ]
-      if len(dst_addr_ex):
-        prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-dst")]
-        prefixlist_name = "%s%s" % (prefixlist_basename, "-dst")
-        dst_prefixlists = [ prefixlist_name ]
+    # DSCP Match
+    if self.term.dscp_match:
+      match_criteria.append('dscp %s' % ' '.join(self.term.dscp_match))
 
 
-      icmp_types = []
-      if self.term.icmp_type:
-        icmp_types = self.NormalizeIcmpTypes(self.term.icmp_type,
-                                             self.term.protocol, self.term_type)
+    # FIXME Make logic for forward-when, discard-when and rate-limit with bit-patterns (flexible-match-mask)
+    # FIXME Juniper flexible-match verbatim bullshit, make something that's actually supported in juniper and nokia
+    if self.term.flexible_match_range:
+      config.Append('flexible-match-range {')
+      for fm_opt in self.term.flexible_match_range:
+        config.Append('%s %s;' % (fm_opt[0], fm_opt[1]))
 
-      # Add the non-lookup prefixes to the source/dest prefix lists
-      if self.term.source_prefix:
-        src_prefixlists.extend(self.term.source_prefix)
+    #
+    # Workaround Nokia's for 1 prefix list per entry
+    # Annoyingly on nokia, one entry can have exactly one prefix list, so this requires a split
+    # The upside is of course getting many many counters
+    #
+    address = self.term.GetAddressOfVersion('address', term_af)
+    address_ex = self.term.GetAddressOfVersion('address_exclude', term_af)
+    src_addr = self.term.GetAddressOfVersion('source_address', term_af)
+    src_addr_ex = self.term.GetAddressOfVersion('source_address_exclude', term_af)
+    dst_addr = self.term.GetAddressOfVersion('destination_address', term_af)
+    dst_addr_ex = self.term.GetAddressOfVersion('destination_address_exclude', term_af)
 
-      if self.term.destination_prefix:
-        dst_prefixlists.extend(self.term.destination_prefix)
+    address_prefixlists = sorted(set([x.parent_token for x in address]))
+    src_prefixlists = sorted(set([x.parent_token for x in src_addr]))
+    dst_prefixlists = sorted(set([x.parent_token for x in dst_addr]))
 
-      # port name mapping to tcp/udp-specific port lists
-      port_names = []
-      source_port_names = []
-      destination_port_names = []
-      for protocol in self.term.protocol:
-        port_names.extend(["%s-%s" % (x, protocol) for x in self.term.port_names])
-        source_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.source_port_names])
-        destination_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.destination_port_names])
+    # Workaround for Nokia not being able to do prefix-list .. exclude in an entry. Refer to the prefix-list for the term
+    if len(address_ex):
+      prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-addr")]
+      prefixlist_name = "%s%s" % (prefixlist_basename, "-addr")
+      address_prefixlists = [ prefixlist_name ]
+    if len(src_addr_ex):
+      prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-src")]
+      prefixlist_name = "%s%s" % (prefixlist_basename, "-src")
+      src_prefixlists = [ prefixlist_name ]
+    if len(dst_addr_ex):
+      prefixlist_basename = ("%s-%s" % (self.filter_name, self.term.name))[:32-len("-dst")]
+      prefixlist_name = "%s%s" % (prefixlist_basename, "-dst")
+      dst_prefixlists = [ prefixlist_name ]
 
-      # Remove empty protocols (for instance tcp where there is no tcp in the ports)
-      port_names = [x for x in port_names if x in self.parent.portlists]
-      source_port_names = [x for x in source_port_names if x in self.parent.portlists]
-      destination_port_names = [x for x in destination_port_names if x in self.parent.portlists]
 
-      # protocol
-      if self.term.protocol:
-        # Nokia supports only one protocol, but to get around this, they added
-        # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
-        if set(self.term.protocol) == {'tcp', 'udp'}:
-          self.term.protocol = ['tcp-udp']
+    icmp_types = []
+    if self.term.icmp_type:
+      icmp_types = self.NormalizeIcmpTypes(self.term.icmp_type,
+                                           self.term.protocol, self.term_type)
 
-        # If we still have one protocol left, add it as match criteria
-        if len(self.term.protocol) == 1:
-          protocol = self.term.protocol[0]
-          if protocol != 'tcp-udp':
-            if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
-              protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]
-            else:
-              protocol = self.PROTO_MAP[protocol]
+    # Add the non-lookup prefixes to the source/dest prefix lists
+    if self.term.source_prefix:
+      src_prefixlists.extend(self.term.source_prefix)
 
-          match_criteria.append("%s %s" % (self.family_keywords['protocol'], protocol))
-        # If we have multiple protocols, create and reference a protocol list
-        else:
-          # We're already warning for the 32 char limit
-          match_criteria.append("%s %s" % (self.family_keywords['protocol-list'], ("%s_%s" % (self.filter_name, self.term.name))[:32]))
+    if self.term.destination_prefix:
+      dst_prefixlists.extend(self.term.destination_prefix)
 
-      # [None] is the neutral list (1) for itertools.product()
-      if not len(address_prefixlists):
-        address_prefixlists = [None]
-      if not len(src_prefixlists):
-        src_prefixlists = [None]
-      if not len(dst_prefixlists):
-        dst_prefixlists = [None]
-      if not len(icmp_types):
-        icmp_types = [None]
-      if not len(port_names):
-        port_names = [None]
-      if not len(source_port_names):
-        source_port_names = [None]
-      if not len(destination_port_names):
-        destination_port_names = [None]
+    # port name mapping to tcp/udp-specific port lists
+    port_names = []
+    source_port_names = []
+    destination_port_names = []
+    for protocol in self.term.protocol:
+      port_names.extend(["%s-%s" % (x, protocol) for x in self.term.port_names])
+      source_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.source_port_names])
+      destination_port_names.extend(["%s-%s" % (x, protocol) for x in self.term.destination_port_names])
 
-      # Create a full product of all lists
-      for manytuple in product(address_prefixlists,
-                               src_prefixlists,
-                               dst_prefixlists,
-                               port_names,
-                               source_port_names,
-                               destination_port_names,
-                               icmp_types):
-        self._write_entry(*manytuple)
+    # Remove empty protocols (for instance tcp where there is no tcp in the ports)
+    port_names = [x for x in port_names if x in self.parent.portlists]
+    source_port_names = [x for x in source_port_names if x in self.parent.portlists]
+    destination_port_names = [x for x in destination_port_names if x in self.parent.portlists]
+
+    # protocol
+    if self.term.protocol:
+      # Nokia supports only one protocol, but to get around this, they added
+      # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
+      if set(self.term.protocol) == {'tcp', 'udp'}:
+        self.term.protocol = ['tcp-udp']
+
+      # If we still have one protocol left, add it as match criteria
+      if len(self.term.protocol) == 1:
+        protocol = self.term.protocol[0]
+        if protocol != 'tcp-udp':
+          if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
+            protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]
+          else:
+            protocol = self.PROTO_MAP[protocol]
+
+        match_criteria.append("%s %s" % (self.family_keywords['protocol'], protocol))
+      # If we have multiple protocols, create and reference a protocol list
+      else:
+        # We're already warning for the 32 char limit
+        match_criteria.append("%s %s" % (self.family_keywords['protocol-list'], ("%s_%s" % (self.filter_name, self.term.name))[:32]))
+
+    # [None] is the neutral list (1) for itertools.product()
+    if not len(address_prefixlists):
+      address_prefixlists = [None]
+    if not len(src_prefixlists):
+      src_prefixlists = [None]
+    if not len(dst_prefixlists):
+      dst_prefixlists = [None]
+    if not len(icmp_types):
+      icmp_types = [None]
+    if not len(port_names):
+      port_names = [None]
+    if not len(source_port_names):
+      source_port_names = [None]
+    if not len(destination_port_names):
+      destination_port_names = [None]
+
+    # Create a full product of all lists
+    for manytuple in product(address_prefixlists,
+                             src_prefixlists,
+                             dst_prefixlists,
+                             port_names,
+                             source_port_names,
+                             destination_port_names,
+                             icmp_types):
+      self._write_entry(*manytuple)
 
     # FIXME implement log facility (numeric)
     # FIXME implement non-named rate-limit facility rate-limit pir / pps-pir
 
-
-    self.CheckTerminatingAction()
 
     # comment / annotation
     if self.term.owner:
@@ -475,14 +450,6 @@ class Term(aclgenerator.Term):
 
     return str(config)
 
-  def CheckTerminatingAction(self):
-    action = set(self.term.action)
-    if self.term.routing_instance:
-      action.add(self.term.routing_instance)
-    if len(action) > 1:
-      raise NokiaMultipleTerminatingActionError(
-          'The following term has multiple terminating actions: %s' %
-          self.term.name)
 
 
 class Nokia(aclgenerator.ACLGenerator):
@@ -831,6 +798,18 @@ class Nokia(aclgenerator.ACLGenerator):
 
       # FIXME filter-id has collisions n in 2^16 where n is number of filters
       config.Append('/configure %s filter-id %d' % (cli_path, crc_hqx(filter_name.encode('utf-8'),0)))
+
+
+      # FIXME workaround for systemfilter bypassing
+      if filter_type == 'inet6':
+        entrycounter = 1
+        for icmp_type in (1,2,3,4,128,129,134,135,136):
+           config.Append('/configure %s entry %d match next-header ipv6-icmp' % (cli_path, entrycounter))
+           config.Append('/configure %s entry %d match icmp type %d' % (cli_path, entrycounter, icmp_type))
+           config.Append('/configure %s entry %d action accept' % (cli_path, entrycounter))
+           entrycounter += 1
+
+
 
       for comment in header.comment:
         for line in comment.split('\n'):

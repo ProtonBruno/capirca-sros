@@ -392,11 +392,12 @@ class Term(aclgenerator.Term):
     if self.term.protocol:
       # Nokia supports only one protocol, but to get around this, they added
       # a hack for tcp + udp as one protocol name 'tcp-udp', it saves on entries.
-      if set(self.term.protocol) == {'tcp', 'udp'}:
-        self.term.protocol = ['tcp-udp']
+      protocol = self.term.protocol
+      if set(protocol) == {'tcp', 'udp'}:
+        protocol = ['tcp-udp']
 
       # If we still have one protocol left, add it as match criteria
-      if len(self.term.protocol) == 1:
+      if len(protocol) == 1:
         protocol = self.term.protocol[0]
         if protocol != 'tcp-udp':
           if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:

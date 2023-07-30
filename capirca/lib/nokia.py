@@ -398,7 +398,7 @@ class Term(aclgenerator.Term):
 
       # If we still have one protocol left, add it as match criteria
       if len(protocol) == 1:
-        protocol = self.term.protocol[0]
+        protocol = protocol[0]
         if protocol != 'tcp-udp':
           if self.PROTO_MAP[protocol] in self._PROTOCOL_REV_MAP:
             protocol = self._PROTOCOL_REV_MAP[self.PROTO_MAP[protocol]]

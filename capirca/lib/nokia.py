@@ -801,16 +801,6 @@ class Nokia(aclgenerator.ACLGenerator):
       config.Append('/configure %s filter-id %d' % (cli_path, crc_hqx(filter_name.encode('utf-8'),0)))
 
 
-      # FIXME workaround for systemfilter bypassing
-      if filter_type == 'inet6':
-        entrycounter = 1
-        for icmp_type in (1,2,3,4,128,129,134,135,136):
-           config.Append('/configure %s entry %d match next-header ipv6-icmp' % (cli_path, entrycounter))
-           config.Append('/configure %s entry %d match icmp type %d' % (cli_path, entrycounter, icmp_type))
-           config.Append('/configure %s entry %d action accept' % (cli_path, entrycounter))
-           entrycounter += 1
-
-
 
       for comment in header.comment:
         for line in comment.split('\n'):

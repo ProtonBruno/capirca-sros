@@ -198,6 +198,7 @@ def RenderFile(base_directory: str, input_file: pathlib.Path,
   sonic_pol = False
   k8s_pol = False
   gce_vpc_tf_pol = False
+  nokiasr = False
 
   try:
     with open(input_file) as f:

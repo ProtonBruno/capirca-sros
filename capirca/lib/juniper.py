@@ -407,17 +407,17 @@ class Term(aclgenerator.Term):
         for prefixlist in prefixlists_ex:
             config.Append('%s except;' % prefixlist)
         for pfx in self.term.source_prefix:
-          config.Append(pfx + ';')
+            config.Append(pfx + ';')
         for epfx in self.term.source_prefix_except:
-          config.Append(epfx + ' except;')
+            config.Append(epfx + ' except;')
         config.Append('}')
       # source prefix <except> list
       elif self.term.source_prefix or self.term.source_prefix_except:
         config.Append('source-prefix-list {')
         for pfx in self.term.source_prefix:
-          config.Append(pfx + ';')
+            config.Append(pfx + ';')
         for epfx in self.term.source_prefix_except:
-          config.Append(epfx + ' except;')
+            config.Append(epfx + ' except;')
         config.Append('}')
 
       # destination address
@@ -433,9 +433,9 @@ class Term(aclgenerator.Term):
         for prefixlist in prefixlists_ex:
             config.Append('%s except;' % prefixlist)
         for pfx in self.term.destination_prefix:
-          config.Append(pfx + ';')
+            config.Append(pfx + ';')
         for epfx in self.term.destination_prefix_except:
-          config.Append(epfx + ' except;')
+            config.Append(epfx + ' except;')
         config.Append('}')
       # destination prefix <except> list
       elif self.term.destination_prefix or self.term.destination_prefix_except:

@@ -1031,7 +1031,7 @@ class Juniper(aclgenerator.ACLGenerator):
         filter_options.remove('enable_dsmo')
       if filter_enhanced_mode:
         filter_options.remove('filter_enhanced_mode')
-        
+
       # default to inet4 filters
       filter_type = 'inet'
       if len(filter_options) > 1:
@@ -1045,15 +1045,13 @@ class Juniper(aclgenerator.ACLGenerator):
       for filter_type in filter_types_to_process:
 
         filter_name_suffix = ''
-        filter_name_prefix = ''
         # If mixed filter_type, will append 4 or 6 to the filter name
         if len(filter_types_to_process) > 1:
           if filter_type == 'inet':
-            #filter_name_suffix = '4'
-            filter_name_prefix = "fw4"
+            filter_name_suffix = '4'
           if filter_type == 'inet6':
-            filter_name_prefix = "fw6"
-            #filter_name_suffix = '6'
+            filter_name_suffix = '6'
+
         term_names = set()
         new_terms = []
         for term in terms:
@@ -1133,7 +1131,7 @@ class Juniper(aclgenerator.ACLGenerator):
 
           new_terms.append(self._TERM(term, filter_type, enable_dsmo, self.noverbose, filter_direction, interface_type))
 
-        self.juniper_policies.append((header, filter_name_prefix + filter_name + filter_name_suffix, filter_type,
+        self.juniper_policies.append((header, filter_name + filter_name_suffix, filter_type,
                                       interface_specific, filter_enhanced_mode, new_terms))
 
   def _GeneratePrefixLists(self, config):

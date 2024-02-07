@@ -406,6 +406,10 @@ class Term(aclgenerator.Term):
             config.Append('%s;' % prefixlist)
         for prefixlist in prefixlists_ex:
             config.Append('%s except;' % prefixlist)
+        for pfx in self.term.source_prefix:
+          config.Append(pfx + ';')
+        for epfx in self.term.source_prefix_except:
+          config.Append(epfx + ' except;')
         config.Append('}')
       # source prefix <except> list
       elif self.term.source_prefix or self.term.source_prefix_except:

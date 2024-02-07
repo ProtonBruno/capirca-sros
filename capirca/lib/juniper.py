@@ -158,7 +158,7 @@ class Term(aclgenerator.Term):
                          'protocol': 'protocol',
                          'protocol-except': 'protocol-except',
                          'tcp-est': 'tcp-established'},
-                'inet6': {'addr': 'address',
+                'inet6': {'addr': 'prefix-list',
                           'saddr': 'source-prefix-list',
                           'daddr': 'destination-prefix-list',
                           'protocol': 'next-header',

@@ -392,6 +392,8 @@ class Term(aclgenerator.Term):
             config.Append('%s except;' % prefixlist)
         config.Append('}')
 
+
+
       # source address
       src_addr = self.term.GetAddressOfVersion('source_address', term_af)
       src_addr_ex = self.term.GetAddressOfVersion('source_address_exclude',
@@ -404,6 +406,14 @@ class Term(aclgenerator.Term):
             config.Append('%s;' % prefixlist)
         for prefixlist in prefixlists_ex:
             config.Append('%s except;' % prefixlist)
+        config.Append('}')
+      # source prefix <except> list
+      elif self.term.source_prefix or self.term.source_prefix_except:
+        config.Append('source-prefix-list {')
+        for pfx in self.term.source_prefix:
+          config.Append(pfx + ';')
+        for epfx in self.term.source_prefix_except:
+          config.Append(epfx + ' except;')
         config.Append('}')
 
       # destination address
@@ -418,6 +428,18 @@ class Term(aclgenerator.Term):
             config.Append('%s;' % prefixlist)
         for prefixlist in prefixlists_ex:
             config.Append('%s except;' % prefixlist)
+        for pfx in self.term.destination_prefix:
+          config.Append(pfx + ';')
+        for epfx in self.term.destination_prefix_except:
+          config.Append(epfx + ' except;')
+        config.Append('}')
+      # destination prefix <except> list
+      elif self.term.destination_prefix or self.term.destination_prefix_except:
+        config.Append('destination-prefix-list {')
+        for pfx in self.term.destination_prefix:
+          config.Append(pfx + ';')
+        for epfx in self.term.destination_prefix_except:
+          config.Append(epfx + ' except;')
         config.Append('}')
 
       # forwarding-class
@@ -429,24 +451,6 @@ class Term(aclgenerator.Term):
       if self.term.forwarding_class_except:
         config.Append('forwarding-class-except %s' % self._Group(
             self.term.forwarding_class_except, lc=False))
-
-      # source prefix <except> list
-      if self.term.source_prefix or self.term.source_prefix_except:
-        config.Append('source-prefix-list {')
-        for pfx in self.term.source_prefix:
-          config.Append(pfx + ';')
-        for epfx in self.term.source_prefix_except:
-          config.Append(epfx + ' except;')
-        config.Append('}')
-
-      # destination prefix <except> list
-      if self.term.destination_prefix or self.term.destination_prefix_except:
-        config.Append('destination-prefix-list {')
-        for pfx in self.term.destination_prefix:
-          config.Append(pfx + ';')
-        for epfx in self.term.destination_prefix_except:
-          config.Append(epfx + ' except;')
-        config.Append('}')
 
       # Only generate ttl if inet, inet6 uses hop-limit instead.
       if self.term.ttl and self.term_type == 'inet':

@@ -752,8 +752,20 @@ class Nokia(aclgenerator.ACLGenerator):
       if len(name) > 32:
         logging.warning('WARNING: Prefix list name "%s"  is too long and will be cropped to "%s"' % (name, name[:32]))
 
-      config.Append('delete filter match-list ip-prefix-list %s' % name[:32])
-      config.Append('delete filter match-list ipv6-prefix-list %s' % name[:32])
+      # Do not delete prefix lists if we don't recreate it! Necessary for non-mixed filters
+      have_ipv4 = False
+      have_ipv6 = False
+      for ip in self.prefixlists[name]:
+        if ip.version == 6:
+          have_ipv6 = True
+        else:
+          have_ipv4 = True
+
+      if have_ipv4:
+        config.Append('delete filter match-list ip-prefix-list %s' % name[:32])
+      if have_ipv6:
+        config.Append('delete filter match-list ipv6-prefix-list %s' % name[:32])
+
       ips = nacaddr.SortAddrList(self.prefixlists[name])
       ips = nacaddr.CollapseAddrList(ips)
       exclude_ips = nacaddr.SortAddrList(self.prefixlists_ex[name])

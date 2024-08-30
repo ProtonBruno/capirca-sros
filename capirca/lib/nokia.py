@@ -316,7 +316,7 @@ class Term(aclgenerator.Term):
 
     # ICMP code (With only single icmp type hopefully)
     if self.term.icmp_code:
-      match_criteria.append('icmp code %s' % self.term.icmp_code)
+      match_criteria.append('icmp code %s' % self.term.icmp_code[0])
 
 
     # DSCP Match

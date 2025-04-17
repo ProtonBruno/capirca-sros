@@ -778,6 +778,8 @@ class Nokia(aclgenerator.ACLGenerator):
         # Nokia workaround for 0.0.0.0/0 in prefix list, expands to 2 /31s, IPv6 works with 2000::/3
         if str(ip) == "0.0.0.0/0":
           write_ips = [ "0.0.0.0/1", "128.0.0.0/1" ]
+        if str(ip) == "::0/0":
+          write_ips = [ "::/1", "8::/1" ]
         else:
           write_ips = [ str(ip) ]
 

@@ -779,7 +779,7 @@ class Nokia(aclgenerator.ACLGenerator):
         if str(ip) == "0.0.0.0/0":
           write_ips = [ "0.0.0.0/1", "128.0.0.0/1" ]
         elif str(ip) == "::/0":
-          write_ips = [ "::/1", "8::/1" ]
+          write_ips = [ "::/1", "8000::/1" ]
         else:
           write_ips = [ str(ip) ]
 

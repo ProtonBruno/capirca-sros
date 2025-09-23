@@ -785,6 +785,9 @@ class Nokia(aclgenerator.ACLGenerator):
           cli_path = "filter match-list %s %s prefix %s" % ("ipv6-prefix-list" if ip.version == 6 else "ip-prefix-list", name[:32], write_ip)
           config.Append('/configure %s' % cli_path)
           if ip.text:
+            # Truncate annotate to comply with SROS 2048 char limitation
+            if len(ip.text) > 2040:
+              ip.text = ip.text[:2040] + '...'
             config.Append('annotate "%s" cli-path %s' % (ip.text.replace("\n", "\\n"), cli_path))
 
       # Write out excludes

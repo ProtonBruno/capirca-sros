@@ -309,7 +309,7 @@ class Term(aclgenerator.Term):
 
     # Only generate ttl if inet, inet6 uses hop-limit instead.
     if self.term.ttl and self.term_type == 'inet':
-      match_criteria.append('ttl lt %s;' % self.term.ttl)
+      match_criteria.append('ttl lt %s' % self.term.ttl)
     # Only generate a hop-limit if inet6, inet4 has no hop-limit.
     if self.term.hop_limit and self.term_type == 'inet6':
       match_criteria.append('hop-limit lt %s' % (self.term.hop_limit))
